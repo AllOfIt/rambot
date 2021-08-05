@@ -1,4 +1,5 @@
 print("Ram started")
+from bs4.element import XMLProcessingInstruction
 import discord
 from random import randint
 import datetime
@@ -313,9 +314,9 @@ class waiter():
         self.endtime = self.setEndtime()
 
     def ready(self):
-#        print(str(self.endtime))
-#        print(str(datetime.datetime.now()))
-#        print(self.endtime<datetime.datetime.now())
+#       print(str(self.endtime))
+#       print(str(datetime.datetime.now()))
+#       print(self.endtime<datetime.datetime.now())
         return self.endtime<datetime.datetime.now()
 
     async def go(self):
@@ -390,13 +391,19 @@ class Format:
     def chess(self,text):
         l = ['a','b','c','d','e','f','g','h']
         n = ['1','2','3','4','5','6','7','8']
-        if len(text) < 5: return False
-        if not text[0] in l: return False
-        if not text[1] in n: return False
-        if not text[2] == ' ': return False
-        if not text[3] in l: return False
-        if not text[4] in n: return False
-        return True
+        p = ['p','k','n','q','r','b']
+        if len(text) == 5 and text[0] in l and text[1] in n and text[2] == ' ' and text[3] in l and text[4] in n:
+            return True
+        elif len(text) == 4:
+            if text[0] in l and text[1] in n and text[2] in l and text[3] in n:
+                return True
+            elif text[0] in p and text[1] in l+n and text[2] in l and text[3] in n:
+                return True
+        elif len(text) == 3 and text[0] in p and text[1] in l and text[2] in n:
+            return True
+        elif len(text) == 2 and text[0] in l and text[1] in n:
+            return True
+        return False
 
     def equations(self,text):
         print(text)
@@ -500,7 +507,11 @@ def gameInit(message,board,inputFormat):
     return package(board.initalMessage,board.out())
 
 def game(message,opponent,board,inputFormat,move):
+    # sanatize move and unpack shorthand
     move = move.lower()
+    move = board.unpackMove(move,message.author.id)
+    if move == False:
+        return item("text","That is not a valid move shorthand.")
     label = board.title+str(message.author.id+opponent.id)+str(message.channel.id)
     legal = board.isLegal(message.author.id,move)
     if legal == True:
@@ -530,6 +541,8 @@ def game(message,opponent,board,inputFormat,move):
             return item('text',legal)
 
 class gameBoard:
+    def unpackMove(self,move):
+        return move,True
     pass
     #def __getstate__(self):
     #    global userCache
@@ -715,6 +728,66 @@ class chessBoard(gameBoard):
                 fileName = "./gameboards/chessboard{}.png".format(self.p1+self.p2)
                 cv2.imwrite(fileName,boardImage)
         return item("file",fileName)
+
+    def unpackMove(self,move,player):
+        if player == self.p1:
+            color = 'b'
+        else:
+            color = 'w'
+        if len(move) == 5:
+            return move
+        pieces = ['p','k','n','q','r','b']
+        ranks = ['1','2','3','4','5','6','7','8']
+        files = ['a','b','c','d','e','f','g','h']
+        if len(move) == 4:
+            if move[0] in files and move[1] in ranks and move[2] in files and move[3] in ranks:
+                return move[:2]+ ' ' + move[2:]
+            elif move[0] in pieces and move[1] in ranks+files and move[2] in files and move[3] in ranks:
+                outx = self.fileRef[move[2]]
+                outy = int(move[3])-1
+                i = 0
+                xref = []
+                yref = []
+                if move[1] in files:
+                    for i in range(8): xref.append(int(self.fileRef[move[1]]))
+                    yref = range(8)
+                else:
+                    for i in range(8): yref.append(int(move[1])-1)
+                    xref = range(8)
+                foundMove = False
+                for i in range(8):
+                    x = xref[i]
+                    y = yref[i]
+                    if self.board[x][y] != None and self.board[x][y][0] == color and self.board[x][y][1] == move[0]:
+                        if [outx,outy] in self.canSee(x,y):
+                            if foundMove:
+                                return False
+                            else:
+                                foundMove = True
+                                outMove = self.fileRef[x]+chr(y+1+48)+' '+move[2:]
+                if foundMove:
+                    return outMove
+        if len(move) == 3:
+            if move[0] in pieces and move[1] in files and move[2] in ranks:
+                foundMove = False
+                outMove = ''
+                outx = self.fileRef[move[1]]
+                outy = int(move[2])-1
+                for x in range(8):
+                    for y in range(8):
+                        if self.board[x][y] != None and self.board[x][y][0] == color and self.board[x][y][1] == move[0]:
+                            if [outx,outy] in self.canSee(x,y):
+                                if foundMove:
+                                    return False
+                                else:
+                                    foundMove = True
+                                    outMove = self.fileRef[x]+chr(y+1+48)+' '+move[1:]
+                if foundMove:
+                    return outMove
+        if len(move) == 2:
+            return self.unpackMove('p'+move,player)
+
+        return False
 
 
     def canSee(self,inx,iny,board = -1):
