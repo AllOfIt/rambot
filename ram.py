@@ -712,6 +712,11 @@ class chessBoard(gameBoard):
         self.board[4][7] = 'bk'
         for i in range(8): self.board[i][6] = 'bp'
         self.expiration = DAY*7
+        self.castleWK = True
+        self.castleWQ = True
+        self.castleBK = True
+        self.castleBQ = True
+        self.enPassent = None
 
     def out(self):
         boardImage = cv2.imread('./chess/board.jpg')
@@ -891,15 +896,48 @@ class chessBoard(gameBoard):
         piece = self.board[inx][iny]
         if piece == None or piece[0] != color:
             return False
-        if not [outx,outy] in self.canSee(inx,iny):
+        exception = False
+        if piece[1] == 'k' and inx == 4 and (outx == 6 or outx == 2): exception = True #castling exception
+        if piece[1] == 'p' and inx != outx and self.board[outx][outy] == None:  exception = True #en passent exception
+        if not (([outx,outy] in self.canSee(inx,iny)) or exception):
             return False
+        #copy board
         newBoard = []
         for x in range(8):
             newBoard.append([])
             for y in range(8):
                 newBoard[x].append(self.board[x][y])
-        newBoard[outx][outy] = newBoard[inx][iny]
-        newBoard[inx][iny] = None
+        #en passent
+        if piece[1] == 'p' and inx != outx and self.board[outx][outy] == None:
+            if self.enPassent == outx:
+                newBoard[outx][iny] = None
+            else:
+                return False
+        #castling
+        if piece[1] == 'k' and inx == 4 and outx == 6: #king's side
+            if (color == 'w' and self.castleWK) or (color == 'b' and self.castleBK):
+                if not (self.board[5][iny] == None and self.board[6][iny] == None):
+                    return False
+                newBoard[4][iny] = piece
+                newBoard[5][iny] = piece
+                newBoard[6][iny] = piece
+                newBoard[7][iny] = None
+            else:
+                return False
+        elif piece[1] == 'k' and inx == 4 and outx == 2: #queen's side
+            if (color == 'w' and self.castleWQ) or (color == 'b' and self.castleBQ):
+                if not (self.board[1][iny] == None and self.board[2][iny] == None and self.board[3][iny] == None):
+                    return False
+                newBoard[4][iny] = piece
+                newBoard[3][iny] = piece
+                newBoard[2][iny] = piece
+                newBoard[0][iny] = None
+            else:
+                return False
+        else:
+            newBoard[outx][outy] = newBoard[inx][iny]
+            newBoard[inx][iny] = None
+        # check if the king can be attacked in projected board
         for x in range(8):
             for y in range(8):
                 if newBoard[x][y] != None and newBoard[x][y][0] != color:
@@ -909,8 +947,40 @@ class chessBoard(gameBoard):
         return True
     
     def move(self,player,move):
-        self.board[self.fileRef[move[3]]][int(move[4])-1] = self.board[self.fileRef[move[0]]][int(move[1])-1]
-        self.board[self.fileRef[move[0]]][int(move[1])-1] = None
+        inx = self.fileRef[move[0]]
+        iny = int(move[1])-1
+        outx = self.fileRef[move[3]]
+        outy = int(move[4])-1
+        color = self.board[inx][iny][0]
+        # whipe en passent
+        self.enPassent = None
+        # check for disallow castle
+        if iny == 0 and (inx == 0 or inx == 4):
+            self.castleWQ = False
+        if iny == 0 and (inx == 7 or inx == 4):
+            self.castleWK = False
+        if iny == 7 and (inx == 0 or inx == 4):
+            self.castleBQ = False
+        if iny == 7 and (inx == 7 or inx == 4):
+            self.castleBK = False
+        if self.board[inx][iny][1] == 'p': #if pawn
+            if outy == 0 or outy == 7: #promotion
+                self.board[inx][iny] = color + 'q'
+            elif  inx != outx and self.board[outx][outy] == None: #en passent
+                self.board[outx][iny] = None
+            elif (outy-iny)**2 > 2: #on double move sent possible en passant
+                self.enPassent = outx
+        # castleing
+        if self.board[inx][iny][1] == 'k':
+            if inx == 4 and outx == 6: #king's side
+                self.board[5][iny] = self.board[7][iny]
+                self.board[7][iny] = None
+            if inx == 4 and outx == 2: #queen's side
+                self.board[3][iny] = self.board[0][iny]
+                self.board[0][iny] = None
+        self.board[outx][outy] = self.board[inx][iny]
+        self.board[inx][iny] = None
+
     def gameOver(self,player):
         if player == self.p1:
             opponent = self.p2
