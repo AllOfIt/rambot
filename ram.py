@@ -717,6 +717,7 @@ class chessBoard(gameBoard):
         self.castleBK = True
         self.castleBQ = True
         self.enPassent = None
+        self.flip = False
 
     def out(self):
         boardImage = cv2.imread('./chess/board.jpg')
@@ -725,13 +726,18 @@ class chessBoard(gameBoard):
                 if self.board[file][rank] == None:
                     continue
                 space = cv2.imread('./chess/{}{}.jpg'.format(self.fileRef[file],rank+1))
-                piece = cv2.imread('./chess/{}.jpg'.format(self.pieceRef[self.board[file][rank]]))
+                pieceFileName = self.pieceRef[self.board[file][rank]]
+                if self.flip:
+                    pieceFileName += " R"
+                piece = cv2.imread('./chess/{}.jpg'.format(pieceFileName))
                 reverse = cv2.bitwise_not(space)
                 boardImage = cv2.bitwise_and(boardImage,reverse)
                 tile = cv2.bitwise_and(piece,space)
                 boardImage = cv2.bitwise_or(boardImage,tile)
-                fileName = "./gameboards/chessboard{}.png".format(self.p1+self.p2)
-                cv2.imwrite(fileName,boardImage)
+        if self.flip:
+            boardImage = cv2.rotate(boardImage,cv2.ROTATE_180)
+        fileName = "./gameboards/chessboard{}.png".format(self.p1+self.p2)
+        cv2.imwrite(fileName,boardImage)
         return item("file",fileName)
 
     def unpackMove(self,move,player):
@@ -745,6 +751,17 @@ class chessBoard(gameBoard):
         ranks = ['1','2','3','4','5','6','7','8']
         files = ['a','b','c','d','e','f','g','h']
         if len(move) == 4:
+             #checking for en passent
+            if self.enPassent != None and move[0] == 'p':
+                outx = self.fileRef[move[2]]
+                outy = int(move[3])-1
+                if self.board[outx][outy] == None and outx == self.enPassent and ((color == 'w' and outy == 5) or (color == 'b' and outy == 2)):
+                    if color == 'w':
+                        inRank = '5'
+                    else:
+                        inRank = '4'
+                    return move[1] + inRank + ' ' + move[2:]
+            #unpack normal move
             if move[0] in files and move[1] in ranks and move[2] in files and move[3] in ranks:
                 return move[:2]+ ' ' + move[2:]
             elif move[0] in pieces and move[1] in ranks+files and move[2] in files and move[3] in ranks:
@@ -773,6 +790,37 @@ class chessBoard(gameBoard):
                 if foundMove:
                     return outMove
         if len(move) == 3:
+            #checking for castling
+            if (move == "kg1" and self.castleWK and color == 'w'):
+                return "e1 g1"
+            if (move == "kc1" and self.castleWQ and color == 'w'):
+                return "e1 c1"
+            if (move == "kg8" and self.castleBK and color == 'b'):
+                return "e8 g8"
+            if (move == "kc8" and self.castleBQ and color == 'b'):
+                return "e8 c8"
+            #checking for en passent
+            if self.enPassent != None and move[0] == 'p':
+                outx = self.fileRef[move[1]]
+                outy = int(move[2])-1
+                if self.board[outx][outy] == None and outx == self.enPassent and ((color == 'w' and outy == 5) or (color == 'b' and outy == 2)):
+                    if color == 'w':
+                        inRank = '5'
+                        iny = 4
+                    else:
+                        inRank = '4'
+                        iny = 3
+                    found = 0
+                    if (not outx == 0) and self.board[outx-1][iny] == color + 'p':
+                        found += 1
+                        inx = outx-1
+                    if(not outx == 7) and self.board[outx+1][inx] == color + 'p':
+                        found += 1
+                        inx = outx+1
+                    if found == 1: 
+                        return self.fileRef[inx] + inRank + ' ' + move[1:]
+                    return False
+            #unpack standard move
             if move[0] in pieces and move[1] in files and move[2] in ranks:
                 foundMove = False
                 outMove = ''
@@ -993,6 +1041,7 @@ class chessBoard(gameBoard):
                 if self.board[x][y] != None and self.board[x][y][0] == opponentColor:
                     for i in self.canSee(x,y):
                         if self.isLegal(opponent,[[x,y],[i[0],i[1]]],False) == True:
+                            self.flip = not self.flip
                             return None
         #there are no legal move past this point and the game is over
         for x in range(8):
