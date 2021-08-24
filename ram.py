@@ -5,7 +5,7 @@ from random import randint
 import datetime
 import sys
 import asyncio
-from lock2 import lock
+from lock3 import lock
 import bs4
 import urllib.request
 import os
@@ -677,7 +677,21 @@ class connectFourBoard(gameBoard):
                 if "   "!=b[x+3][i]==b[x+2][i+1]==b[x+1][i+2]==b[x][i+3]:
                     return winner(b[x+3][i])
         return None
-        
+
+CHESS_HELP = "To move, type the letter for your piece and the destination square. Ex: qd6\n\
+If multiple pieces of the same type can reach a square, specify by the rank or file that they do not have in common Ex: nfc3\n\
+If you do not specify a piece, I will assume you mean a pawn Ex: e4 is the same as pe4\n\
+To castle, move your king to the castled square Ex: kg1\n\
+You can also express any move explicitly using input and output square Ex: b5 c6 or b5c6\n\
+Pieces:\n\
+p = pawn\n\
+n = knight\n\
+b = bishop\n\
+r = rook\n\
+q = queen\n\
+k = king\n\
+Games expire after one week.\n\
+Have fun losing Barasu."
 class chessBoard(gameBoard):
     def __init__(self,player1,player2):
         self.fileRef = {0:'a',1:'b',2:'c',3:'d',4:'e',5:'f',6:'g',7:'h','a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7}
@@ -685,7 +699,7 @@ class chessBoard(gameBoard):
                          'br':'black rook','bn':'black knight','bb':'black bishop','bq':'black queen','bk':'black king','bp':'black pawn'}
         print("starting chess")
         self.title = "Chess"
-        self.initalMessage = item("text",'Welcome to Chess beta\n Example move: "e2 e4"')
+        self.initalMessage = item("text",'Welcome to Chess beta\n type "ram chess help" for detailed controls')
         self.p1 = player1
         self.p2 = player2
         self.board = []
@@ -1381,13 +1395,14 @@ def reset():
         response(["tictactoe","tic tac toe"],"here",ticBoard,F.ticTacToe,function = gameInit,passMessage = True),
         response(["connect four","fonnect cour","connectfour"],"here",connectFourBoard,F.connectFour,function = gameInit,passMessage = True),
         response("chess","here",chessBoard,F.chess,function = gameInit,passMessage = True),
+        response("chess help",CHESS_HELP),
         response(["interpolate","interp"],None,function = interpolate,takeArgs = True),
         response("bakamemes","OK",function = bakaMemes,locked = True)
     ]
 
 
     waiters = [
-        dailyPoster(datetime.time(hour = 19),BARASU,package(
+        dailyPoster(datetime.time(hour = 23),BARASU,package(
             runAtSend(redditRetrieve,5,"goodanimemes","top"),runAtSend(redditRetrieve,5,"animemes","top"))),
         randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","owo daily")),
         randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
@@ -1396,8 +1411,8 @@ def reset():
     #    removeResponse(30,AVERAGE_PHOTOGRAPHER_SPAM,"30seconds","30 seconds have passed")
     #    cacheWaiter(1)
         ]
-#if waiters[0].endtime+datetime.timedelta(days = -1)>datetime.datetime.now():
-#    waiters[0].endtime = waiters[0].endtime + datetime.timedelta(days = -1)
+    if waiters[0].endtime+datetime.timedelta(days = -1)>datetime.datetime.now():
+        waiters[0].endtime = waiters[0].endtime + datetime.timedelta(days = -1)
 
 
 
@@ -1417,13 +1432,13 @@ async def on_message(message):
         print("updating")
         await message.channel.send("saving file (live)")
         await message.attachments[0].save("ram.py")
-    if message.content == ".reset":
+    if message.content == ".reset " + lock():
         await message.channel.send("Setting default responses and waiters...")
         reset()
-    if message.content == ".cache":
+    if message.content == ".cache " + lock():
         await message.channel.send("Saving to cache...")
         writeCache()
-    if message.content == ".load":
+    if message.content == ".load " + lock():
         await message.channel.send("Loading from cache...")
         await loadCache()
     if message.content == ".addthing":
