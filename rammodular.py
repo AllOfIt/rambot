@@ -1,11 +1,11 @@
 print("Ram started")
-from botbasics import *
-import datetime
+from bs4.element import XMLProcessingInstruction
 import discord
-import asyncio
-from games import *
+from random import randint
+import datetime
 import sys
-from lock2 import lock
+import asyncio
+from lock3 import lock
 import bs4
 import urllib.request
 import os
@@ -13,10 +13,20 @@ from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 from difflib import SequenceMatcher
 import math
+import cv2
+import numpy
+import pickle
 from interp import interp
+
+from botbasics import *
+from games import *
+
 client = discord.Client()
 KEY_CHARACTER = 'ram '
 POST_IMAGES = False
+
+CACHE = "./cache.pkl"
+AUTO_CACHE_DELAY = 60*5
 
 BARASU = 691843825483776100
 AVERAGE_PHOTOGRAPHER_SPAM = 680843866349633568
@@ -27,6 +37,8 @@ KYLE = 331974513636147202
 
 DAY = 86400
 
+responses = []
+waiters = []
 
 
 class time(response):
@@ -42,6 +54,22 @@ class exit(response):
         print("exiting")
         sys.exit()
 
+
+class dailyCleanup(dailyPoster):
+    def __init__(self,time):
+        self.time = time
+
+    def go(self):
+        pass
+    
+class cacheWaiter(waiter):
+    def __init__(self,delayMinutes):
+        waiter.__init__(self,delayMinutes*60,None,None,-1,catchup = False)
+
+    async def go(self):
+        writeCache()
+        self.endtime = self.setEndtime()
+
 class Format:
     def __init__(self):
         self.alphabet = list("qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM_")
@@ -56,6 +84,24 @@ class Format:
 
     def connectFour(self,text):
         if len(text) == 1 and  text in list("1234567"):
+            return True
+        return False
+    
+    def chess(self,text):
+        text = text.lower()
+        l = ['a','b','c','d','e','f','g','h']
+        n = ['1','2','3','4','5','6','7','8']
+        p = ['p','k','n','q','r','b']
+        if len(text) == 5 and text[0] in l and text[1] in n and text[2] == ' ' and text[3] in l and text[4] in n:
+            return True
+        elif len(text) == 4:
+            if text[0] in l and text[1] in n and text[2] in l and text[3] in n:
+                return True
+            elif text[0] in p and text[1] in l+n and text[2] in l and text[3] in n:
+                return True
+        elif len(text) == 3 and text[0] in p and text[1] in l and text[2] in n:
+            return True
+        elif len(text) == 2 and text[0] in l and text[1] in n:
             return True
         return False
 
@@ -145,7 +191,6 @@ def redditRetrieve(number,subreddit,section='hot'):
     for i in names:
         pack.items.append(item("file",i))
     return pack
-
 
 
 def webwork(message,problem):
@@ -347,6 +392,23 @@ def webworkSolve(message,equations,answers,new=None):
                 out+=i+'\n'
         return item("text",out)
 
+
+def parse(string=None,key=' '):
+    out = []
+    index = 0
+    out.append("")
+    foundOne = False
+    for i in string:
+        if i==key:
+            foundOne = True
+            index+=1
+            out.append("")
+        else:
+            out[index]+=i
+    if not foundOne:
+        return [string]
+    return out
+
 def echo(*args):
     out = package()
     for i in args:
@@ -354,20 +416,21 @@ def echo(*args):
     return out
 
 
+def writeCache():
+    print("Writing to cache...")
+    with open(CACHE, 'wb') as outFile:
+        pickle.dump((responses,waiters),outFile)
 
-def cancel(message):
-    user = message.author.id
-    actions = 0
+async def loadCache():
     global responses
     global waiters
-    for i in responses:
-        if i.label != "normal" and i.user == user:
-            w = findWaiter(i.label)
-            if w != None:
-                waiters.remove(w)
-            responses.remove(i)
-            actions+=1
-    return item("text","{} actions canceled".format(actions))
+    with open(CACHE, 'rb') as inFile:
+        cache = pickle.load(inFile)
+    responses = cache[0]
+    waiters = cache[1]
+
+
+
 
 def scramble():
     pass
@@ -375,17 +438,6 @@ def scramble():
 def runAtSendTest():
     return item("text","test run")
 
-def findResponse(label):
-    for i in responses:
-        if i.label == label:
-            return i
-    return None
-
-def findWaiter(label):
-    for i in waiters:
-        if i.label == label:
-            return i
-    return None
 
 def interpolate(*args):
     try:
@@ -401,56 +453,60 @@ def bakaMemes():
 
 
 F = Format()
-responses = [
-#    exit("exit"),
-    response(["cancel","stop"],passMessage = True,function = cancel),
-    response(["hello","hi"], ["Hello Barasu", "Hello", "hey"]),
-    response(["hello ram","hi ram","ram hello","ram hi"],["Hello Barasu", "Hello", "hey"],usePrefix = False),
-    response("Ping", "Pong"),
-    response("Marco", "Polo",usePrefix = False),
-#    time(["time","what time is it?","what time is it"]),
-    response("b.rem","Who's Rem?",usePrefix = False),
-    response("flip a coin",["Heads","Tails"]),
-    response(["snap?","snap"],["Death","Mercy"]),
-    response("send yourself",item("file","./ram.py")),
-    response("send bootstrapper",item("file","./bootstrapper.py")),
-    response("send starter",item("file","./starter.py")),
-    response("send backup",item("file","./rambackup.py")),
-    response("send test meme",runAtSend(redditRetrieve,2,"goodanimemes","top")),
-    response("help","Look I don't really know what's going on either"),
-    response("send lock","nice try barasu"),
-    response("runatsend test",runAtSend(runAtSendTest)),
-    response("hushhush",";)",locked = True),
-    response(None,["Fuck you Kyle",None,None],user = KYLE,usePrefix = False),
-    response("berserk",package(
-        runAtSend(redditRetrieve,4,"nukedmemes"),
-        runAtSend(redditRetrieve,4,"cursedimages"),
-        runAtSend(redditRetrieve,4,"goodanimemes")
-    ),locked = True),
-    response("echo",None,takeArgs = True,function = echo,parse = False),
-    response("parse",None,takeArgs = True,function = echo),
-    response("meme",None,1,function = redditRetrieve,takeArgs = True),
-    response("Function test",None,"hello World",function = echo),
-#    response("30 seconds?","not yet",label = "30seconds"),
-    response("webwork",function = webwork,takeArgs = True,parse = False,passMessage = True),
-    response("tictactoe","here",ticBoard,F.ticTacToe,function = gameInit,passMessage = True),
-    response(["connect four beta","fonnect cour beta"],"here",connectFourBoard,F.connectFour,function = gameInit,passMessage = True),
-    response(["interpolate","interp"],None,function = interpolate,takeArgs = True),
-    response("bakamemes","OK",function = bakaMemes,locked = True)
-]
 
-
-waiters = [
-    dailyPoster(datetime.time(hour = 19),BARASU,package(
-        runAtSend(redditRetrieve,5,"goodanimemes","top"),runAtSend(redditRetrieve,5,"animemes","top"))),
-    randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","owo daily")),
-    randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
-#    waiter(15,AVERAGE_PHOTOGRAPHER_SPAM,runAtSend(redditRetrieve,2,"dankmemes","new"),4)
-    waiter(10,AVERAGE_PHOTOGRAPHER_SPAM,item("text","Heartbeat"),10)
-#    removeResponse(30,AVERAGE_PHOTOGRAPHER_SPAM,"30seconds","30 seconds have passed")
+def reset():
+    global responses
+    global waiters
+    responses = [
+        response(["cancel","stop"],passMessage = True,function = cancel),
+        response(["hello ram","hi ram","ram hello","ram hi"],["Hello Barasu", "Hello", "hey"],usePrefix = False),
+        response("Ping", "Pong"),
+        response("Marco", "Polo",usePrefix = False),
+        response(["b.rem","rem"],"Who's Rem?",usePrefix = False),
+        response("flip a coin",["Heads","Tails"]),
+        response(["snap?","snap"],["Death","Mercy"]),
+        response("send yourself",item("file","./ram.py")),
+        response("send bootstrapper",item("file","./bootstrapper.py")),
+        response("send starter",item("file","./starter.py")),
+        response("send backup",item("file","./rambackup.py")),
+        response("send test meme",runAtSend(redditRetrieve,2,"goodanimemes","top")),
+        response("help","Look I don't really know what's going on either"),
+        response("send lock","nice try barasu"),
+        response("runatsend test",runAtSend(runAtSendTest)),
+        response("hushhush",";)",locked = True),
+        response(None,["Fuck you Kyle",None,None],user = KYLE,usePrefix = False),
+        response("berserk",package(
+            runAtSend(redditRetrieve,4,"nukedmemes"),
+            runAtSend(redditRetrieve,4,"cursedimages"),
+            runAtSend(redditRetrieve,4,"goodanimemes")
+        ),locked = True),
+        response("echo",None,takeArgs = True,function = echo,parse = False),
+        response("parse",None,takeArgs = True,function = echo),
+        response("meme",None,1,function = redditRetrieve,takeArgs = True),
+        response("Function test",None,"hello World",function = echo),
+    #    response("30 seconds?","not yet",label = "30seconds"),
+        response("webwork",function = webwork,takeArgs = True,parse = False,passMessage = True),
+        response(["tictactoe","tic tac toe"],"here",ticBoard,F.ticTacToe,function = gameInit,passMessage = True),
+        response(["connect four","fonnect cour","connectfour"],"here",connectFourBoard,F.connectFour,function = gameInit,passMessage = True),
+        response("chess","here",chessBoard,F.chess,function = gameInit,passMessage = True),
+        response("chess help",CHESS_HELP),
+        response(["interpolate","interp"],None,function = interpolate,takeArgs = True),
+        response("bakamemes","OK",function = bakaMemes,locked = True)
     ]
-#if waiters[0].endtime+datetime.timedelta(days = -1)>datetime.datetime.now():
-#    waiters[0].endtime = waiters[0].endtime + datetime.timedelta(days = -1)
+
+
+    waiters = [
+        dailyPoster(datetime.time(hour = 23),BARASU,package(
+            runAtSend(redditRetrieve,5,"goodanimemes","top"),runAtSend(redditRetrieve,5,"animemes","top"))),
+        randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","owo daily")),
+        waiter(DAY + 10,SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
+    #    waiter(15,AVERAGE_PHOTOGRAPHER_SPAM,runAtSend(redditRetrieve,2,"dankmemes","new"),4)
+        waiter(10,AVERAGE_PHOTOGRAPHER_SPAM,item("text","Heartbeat"),10),
+    #    removeResponse(30,AVERAGE_PHOTOGRAPHER_SPAM,"30seconds","30 seconds have passed")
+    #    cacheWaiter(1)
+        ]
+    if waiters[0].endtime+datetime.timedelta(days = -1)>datetime.datetime.now():
+        waiters[0].endtime = waiters[0].endtime + datetime.timedelta(days = -1)
 
 
 
@@ -470,6 +526,19 @@ async def on_message(message):
         print("updating")
         await message.channel.send("saving file (live)")
         await message.attachments[0].save("ram.py")
+    if message.content == ".reset " + lock():
+        await message.channel.send("Setting default responses and waiters...")
+        reset()
+    if message.content == ".cache " + lock():
+        await message.channel.send("Saving to cache...")
+        writeCache()
+    if message.content == ".load " + lock():
+        await message.channel.send("Loading from cache...")
+        await loadCache()
+    if message.content == ".addthing":
+        await message.channel.send("adding thing")
+        global responses
+        responses.append(response("thing","ok",1,label = "thing"))
     try:
         if message.content == ".exit "+lock():
             await message.channel.send("bye...")
@@ -488,10 +557,39 @@ async def on_message(message):
 
 
 
+async def iterator():
+    global waiters
+    now = datetime.datetime.now()
+    while True:
+        await asyncio.sleep(1)
+        try:
+            #print("looping")
+            for i in waiters:
+                if i.ready():
+                    #print("go")
+                    await i.go()
+                    if not i.keep():
+                        waiters.remove(i)
+        except Exception as e:
+            print("iterator error: {}".format(e))
 
+async def cacheLoop():
+    while True:
+        try:
+            await asyncio.sleep(AUTO_CACHE_DELAY)
+            writeCache()
+        except Exception as e:
+            print("Autosave Exception: {}".format(e))
+
+try:
+    asyncio.ensure_future(loadCache())
+except Exception as e:
+    reset()
+    print("Pickle Load Exception: {}".format(e))
 mainLoop = asyncio.get_event_loop()
 try:
-    asyncio.ensure_future(iterator(client))
+    asyncio.ensure_future(iterator())
+    asyncio.ensure_future(cacheLoop())
     print("here")
     with open('key.txt','r') as key:
 #        print(key.read())
@@ -501,5 +599,6 @@ except Exception as e:
     print(e)
 finally:
     print("closing loop")
+    writeCache()
     mainLoop.close()
 

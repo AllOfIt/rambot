@@ -1,16 +1,14 @@
-import discord
-import asyncio
-from lock2 import lock
-from random import randint
-import datetime
-KEY_CHARACTER = '/'
-responses = []
-waiters = []
-
 class item():
     def __init__(self,type=None,content=None):
         self.type = type
         self.content = content
+
+    def __getstate__(self):
+        return (self.type,self.content)
+
+    def __setstate__(self,data):
+        self.type = data[0]
+        self.content = data[1]
 
     def __str__(self):
         return "{0.type} Item: {0.content}".format(self)
@@ -33,6 +31,12 @@ class package():
     def __init__(self,*args):
         self.items = list(args)
 
+    def __getstate__(self):
+        return self.items
+    
+    def __setstate__(self,data):
+        self.items = data
+
     def __str__(self):
         out = "["
         for i in self.items:
@@ -54,6 +58,10 @@ class runAtSend():
 
     async def send(self,place):
         await self.function(*self.args).send(place)
+
+class userPlaceholder:
+    def __init__(self,id): self.id = id
+    def user(self): return client.get_user(id)
 
 class response:
     def __init__(self,textIn=None,content = None,*args,**kwargs):
@@ -103,6 +111,62 @@ class response:
             self.out = content
         else:
             self.out = content
+
+    def __getstate__(self):
+        out = []
+        out.append(self.label)
+        out.append(self.inn)
+        outArgs = []
+        for a in self.args:
+            try:
+                outArgs.append(userPlaceholder(a.id))
+            except:
+                outArgs.append(a)
+        out.append(tuple(outArgs))
+        out.append(self.usePrefix)
+        out.append(self.user)
+        out.append(self.channel)
+        out.append(self.function)
+        out.append(self.locked)
+        out.append(self.parse)
+        out.append(self.takeArgs)
+        out.append(self.error)
+        out.append(self.passMessage)
+        out.append(self.format)
+        out.append(self.out)
+        return out
+
+    def __setstate__(self,data):
+        self.label = data[0]
+        self.inn = data[1]
+        args = []
+        for i in range(len(data[2])):
+            try:
+                args.append(data[2][i].user())
+                if args[i] == None:
+                    asyncio.ensure_future(self.fetchUser(data[2][i].id,i))
+            except:
+                args.append(data[2][i])
+        self.args = tuple(args)
+        self.usePrefix = data[3]
+        self.user = data[4]
+        self.channel = data[5]
+        self.function = data[6]
+        self.locked = data[7]
+        self.parse = data[8]
+        self.takeArgs = data[9]
+        self.error = data[10]
+        self.passMessage = data[11]
+        self.format = data[12]
+        self.out = data[13]
+
+    async def fetchUser(self,id,index):
+        args = list(self.args)
+        args[index] = await client.fetch_user(id)
+        if args[index] == None:
+            print("Fetch user failed on response {}:{} -> {}".format(self.label,self.inn,self.out))
+        else:
+            self.args = tuple(args)
 
     def messageIn(self,message):
         text = message.content
@@ -172,6 +236,7 @@ class waiter():
         self.label = "normal"
         self.time = time
         self.place = place
+        self.catchup = False
         if isinstance(content,str):
             self.content = item("text",content)
         else:
@@ -182,22 +247,27 @@ class waiter():
         for name,value in kwargs.items():
             if name == "label":
                 self.label = value
+            elif name == "catchup":
+                self.catchup = value
             else:
                 print("bad kwarg in waiter")
 
     def setEndtime(self):
-        return datetime.timedelta(seconds = self.time) + self.endtime
+        if self.catchup:
+            return datetime.timedelta(seconds = self.time) + self.endtime
+        else:
+            return datetime.timedelta(seconds = self.time) + datetime.datetime.now()
 
     def reset(self):
         self.endtime = self.setEndtime()
 
     def ready(self):
-#        print(str(self.endtime))
-#        print(str(datetime.datetime.now()))
-#        print(self.endtime<datetime.datetime.now())
+#       print(str(self.endtime))
+#       print(str(datetime.datetime.now()))
+#       print(self.endtime<datetime.datetime.now())
         return self.endtime<datetime.datetime.now()
 
-    async def go(self,client):
+    async def go(self):
         await self.content.send(client.get_channel(self.place))
         self.endtime = self.setEndtime()
 
@@ -244,6 +314,20 @@ def remove(label):
     if w != None:
         waiters.remove(w)
 
+def cancel(message):
+    user = message.author.id
+    actions = 0
+    global responses
+    global waiters
+    for i in responses:
+        if i.label != "normal" and i.user == user:
+            w = findWaiter(i.label)
+            if w != None:
+                waiters.remove(w)
+            responses.remove(i)
+            actions+=1
+    return item("text","{} actions canceled".format(actions))
+
 def findResponse(label):
     for i in responses:
         if i.label == label:
@@ -255,36 +339,3 @@ def findWaiter(label):
         if i.label == label:
             return i
     return None
-
-def parse(string=None,key=' '):
-    out = []
-    index = 0
-    out.append("")
-    foundOne = False
-    for i in string:
-        if i==key:
-            foundOne = True
-            index+=1
-            out.append("")
-        else:
-            out[index]+=i
-    if not foundOne:
-        return [string]
-    return out
-
-async def iterator(client):
-    print("starting iterator")
-    global waiters
-    now = datetime.datetime.now()
-    while True:
-        await asyncio.sleep(1)
-        try:
-            #print("looping")
-            for i in waiters:
-                if i.ready():
-                    print("go")
-                    await i.go(client)
-                    if not i.keep():
-                        waiters.remove(i)
-        except Exception as e:
-            print("iterator error: {}".format(e))
