@@ -37,7 +37,7 @@ responses = []
 waiters = []
 
 class item():
-    def __init__(self,type=None,content=None):
+    def __init__(self,type=None,content=None, messageID = None):
         self.type = type
         self.content = content
 
@@ -389,6 +389,7 @@ class Format:
         return False
     
     def chess(self,text):
+        text = text.lower()
         l = ['a','b','c','d','e','f','g','h']
         n = ['1','2','3','4','5','6','7','8']
         p = ['p','k','n','q','r','b']
@@ -492,18 +493,32 @@ def redditRetrieve(number,subreddit,section='hot'):
         pack.items.append(item("file",i))
     return pack
 
-def gameInit(message,board,inputFormat):
-    if len(message.mentions)!=1:
-        return item("text","@ one person to play with")
-    board = board(message.author.id,message.mentions[0].id)
-    label = board.title+str(message.author.id+message.mentions[0].id)+str(message.channel.id)
+def gameInit(message,board,inputFormat,playersMin = 2,playersMax = 2):
+    if playersMin > len(message.mentions)+1 or len(message.mentions)+1 > playersMax:
+        if playersMin == playersMax == 2:
+            return item("text","@ one person to play with")
+        return item("text","@ between {} and {} people".format(playersMin, playersMax))
+    if playersMin == playersMax == 2:
+        board = board(message.author.id,message.mentions[0].id)
+        labelCode = message.author.id + message.mentions[0].id
+        names = message.mentions[0].display_name + ' '
+    else:
+        opponents = []
+        labelCode = message.author.id
+        names = ""
+        for i in message.mentions:
+            opponents.append(i.id)
+            labelCode += i.id
+            names += i.display_name + ' '
+        board = board(message.author.id, opponents)
+    label = board.title+str(labelCode)+str(message.channel.id)
     if findResponse(label)!=None:
-        return item("text","{} game with {} active, send 'ram cancel' on your turn to cancel the game".format(board.title,message.mentions[0].display_name))
+        return item("text","{} game with {}active in this channel, send 'ram cancel' on your turn to cancel the game".format(board.title,names))
     print("set the board")
     global responses
     responses.append(response("",None,message.author,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = message.mentions[0].id,passMessage = True,format = inputFormat,label = label))
     global waiters
-    waiters.append(removeResponse(board.expiration,message.channel.id,label,item("text",board.title+" game between {} and {} has expired".format(message.author.display_name,message.mentions[0].display_name)),label = label))
+    waiters.append(removeResponse(board.expiration,message.channel.id,label,item("text",board.title+" game with {} has expired".format(names)),label = label))
     return package(board.initalMessage,board.out())
 
 def game(message,opponent,board,inputFormat,move):
@@ -540,7 +555,16 @@ def game(message,opponent,board,inputFormat,move):
         else:
             return item('text',legal)
 
-class gameBoard:
+class GameBoard:
+
+    def __init__(self,opponents):
+        self.opponents = opponents
+        self.playerTurn = 1
+
+    def nextTurn(self):
+        self.playerTurn = (self.playerTurn + 1) % len(self.playerTurn)
+        return self.opponents[self.playerTurn]
+
     def unpackMove(self,move):
         return move,True
     pass
@@ -556,8 +580,9 @@ class gameBoard:
     #    self.__init__(p1,p2)
     #    self.board = data[2]
 
-class ticBoard(gameBoard):
+class TicBoard(GameBoard):
     def __init__(self,player1,player2):
+        GameBoard.__init__(self,[player1,player2])
         print("in ticBoard.__init__()")
         self.key = {'a':0,'b':1,'c':2,'1':0,'2':1,'3':2}
         self.p1 = player1
@@ -611,8 +636,9 @@ c  {} |  {} | {}".format(self.board[0][0],self.board[0][1],self.board[0][2],self
         return "stalemate"
 
 
-class connectFourBoard(gameBoard):
+class ConnectFourBoard(GameBoard):
     def __init__(self,player1,player2):
+        GameBoard.__init__(self,[player1,player2])
         print("starting connect 4")
         self.title = "Connect Four"
         self.initalMessage = item("text","Welcome to Connect Four beta\n to move, type a number 1 through 7")
@@ -692,8 +718,9 @@ q = queen\n\
 k = king\n\
 Games expire after one week.\n\
 Have fun losing Barasu."
-class chessBoard(gameBoard):
+class ChessBoard(GameBoard):
     def __init__(self,player1,player2):
+        GameBoard.__init__(self,[player1,player2])
         self.fileRef = {0:'a',1:'b',2:'c',3:'d',4:'e',5:'f',6:'g',7:'h','a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7}
         self.pieceRef = {'wr':'white rook','wn':'white knight','wb':'white bishop','wq':'white queen','wk':'white king','wp':'white pawn',
                          'br':'black rook','bn':'black knight','bb':'black bishop','bq':'black queen','bk':'black king','bp':'black pawn'}
@@ -1368,7 +1395,7 @@ def reset():
         response(["hello ram","hi ram","ram hello","ram hi"],["Hello Barasu", "Hello", "hey"],usePrefix = False),
         response("Ping", "Pong"),
         response("Marco", "Polo",usePrefix = False),
-        response("b.rem","Who's Rem?",usePrefix = False),
+        response(["b.rem","rem"],"Who's Rem?",usePrefix = False),
         response("flip a coin",["Heads","Tails"]),
         response(["snap?","snap"],["Death","Mercy"]),
         response("send yourself",item("file","./ram.py")),
@@ -1392,9 +1419,9 @@ def reset():
         response("Function test",None,"hello World",function = echo),
     #    response("30 seconds?","not yet",label = "30seconds"),
         response("webwork",function = webwork,takeArgs = True,parse = False,passMessage = True),
-        response(["tictactoe","tic tac toe"],"here",ticBoard,F.ticTacToe,function = gameInit,passMessage = True),
-        response(["connect four","fonnect cour","connectfour"],"here",connectFourBoard,F.connectFour,function = gameInit,passMessage = True),
-        response("chess","here",chessBoard,F.chess,function = gameInit,passMessage = True),
+        response(["tictactoe","tic tac toe"],"here",TicBoard,F.ticTacToe,function = gameInit,passMessage = True),
+        response(["connect four","fonnect cour","connectfour"],"here",ConnectFourBoard,F.connectFour,function = gameInit,passMessage = True),
+        response("chess","here",ChessBoard,F.chess,function = gameInit,passMessage = True),
         response("chess help",CHESS_HELP),
         response(["interpolate","interp"],None,function = interpolate,takeArgs = True),
         response("bakamemes","OK",function = bakaMemes,locked = True)
@@ -1405,7 +1432,7 @@ def reset():
         dailyPoster(datetime.time(hour = 23),BARASU,package(
             runAtSend(redditRetrieve,5,"goodanimemes","top"),runAtSend(redditRetrieve,5,"animemes","top"))),
         randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","owo daily")),
-        randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
+        waiter(DAY + 10,SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
     #    waiter(15,AVERAGE_PHOTOGRAPHER_SPAM,runAtSend(redditRetrieve,2,"dankmemes","new"),4)
         waiter(10,AVERAGE_PHOTOGRAPHER_SPAM,item("text","Heartbeat"),10),
     #    removeResponse(30,AVERAGE_PHOTOGRAPHER_SPAM,"30seconds","30 seconds have passed")
