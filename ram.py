@@ -157,7 +157,10 @@ class response:
         outArgs = []
         for a in self.args:
             try:
-                outArgs.append(userPlaceholder(a.id))
+                newArg = []
+                for i in a:
+                    newArg.append(userPlaceholder(i.id))
+                outArgs.append(newArg)
             except:
                 outArgs.append(a)
         out.append(tuple(outArgs))
@@ -177,15 +180,8 @@ class response:
     def __setstate__(self,data):
         self.label = data[0]
         self.inn = data[1]
-        args = []
-        for i in range(len(data[2])):
-            try:
-                args.append(data[2][i].user())
-                if args[i] == None:
-                    asyncio.ensure_future(self.fetchUser(data[2][i].id,i))
-            except:
-                args.append(data[2][i])
-        self.args = tuple(args)
+        self.args = data[2]
+        asyncio.ensure_future(self.fixArgs())
         self.usePrefix = data[3]
         self.user = data[4]
         self.channel = data[5]
@@ -197,6 +193,19 @@ class response:
         self.passMessage = data[11]
         self.format = data[12]
         self.out = data[13]
+
+    async def fixArgs(self):
+        argsOut = []
+        for a in self.args:
+            newArg = []
+            try:
+                for i in range(len(a)):
+                    newArg[i] = a[i].user()
+                    if newArg[i] == None:
+                        newArg[i] = await client.fetch_user(a[i].id)
+            except:
+                argsOut.append(a)
+        self.args = tuple(argsOut)
 
     async def fetchUser(self,id,index):
         args = list(self.args)
@@ -387,6 +396,11 @@ class Format:
         if len(text) == 1 and  text in list("1234567"):
             return True
         return False
+
+    def reversi(self,text):
+        if len(text)!=2 or not text[0] in list("abcdefghABCDEFGH") or not text[1] in list("12345678"):
+            return False
+        return True
     
     def chess(self,text):
         text = text.lower()
@@ -493,67 +507,76 @@ def redditRetrieve(number,subreddit,section='hot'):
         pack.items.append(item("file",i))
     return pack
 
-def gameInit(message,board,inputFormat,playersMin = 2,playersMax = 2):
+def gameInit(message,boardClass,inputFormat,playersMin = 2,playersMax = 2):
     if playersMin > len(message.mentions)+1 or len(message.mentions)+1 > playersMax:
         if playersMin == playersMax == 2:
             return item("text","@ one person to play with")
         return item("text","@ between {} and {} people".format(playersMin, playersMax))
-    if playersMin == playersMax == 2:
-        board = board(message.author.id,message.mentions[0].id)
-        labelCode = message.author.id + message.mentions[0].id
-        names = message.mentions[0].display_name + ' '
-    else:
-        opponents = []
-        labelCode = message.author.id
-        names = ""
-        for i in message.mentions:
-            opponents.append(i.id)
-            labelCode += i.id
-            names += i.display_name + ' '
-        board = board(message.author.id, opponents)
+    opponents = [message.author]
+    labelCode = message.author.id
+    names = message.author.display_name
+    for i in message.mentions:
+        opponents.append(i)
+        labelCode += i.id
+        names += ' ' + i.display_name
+    board = boardClass(opponents)
     label = board.title+str(labelCode)+str(message.channel.id)
     if findResponse(label)!=None:
-        return item("text","{} game with {}active in this channel, send 'ram cancel' on your turn to cancel the game".format(board.title,names))
+        return item("text","{} game with {} active in this channel, send 'ram cancel' on your turn to cancel the game".format(board.title,names))
     print("set the board")
     global responses
-    responses.append(response("",None,message.author,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = message.mentions[0].id,passMessage = True,format = inputFormat,label = label))
+    responses.append(response("",None,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = message.mentions[0].id,passMessage = True,format = inputFormat,label = label))
     global waiters
     waiters.append(removeResponse(board.expiration,message.channel.id,label,item("text",board.title+" game with {} has expired".format(names)),label = label))
     return package(board.initalMessage,board.out())
 
-def game(message,opponent,board,inputFormat,move):
+def game(message,board,inputFormat,move):
+    # remake label
+    labelCode = 0
+    for i in board.opponents: 
+        labelCode += i.id
+    label = board.title+str(labelCode)+str(message.channel.id)
     # sanatize move and unpack shorthand
     move = move.lower()
     move = board.unpackMove(move,message.author.id)
+    print(move)
     if move == False:
-        return item("text","That is not a valid move shorthand.")
-    label = board.title+str(message.author.id+opponent.id)+str(message.channel.id)
-    legal = board.isLegal(message.author.id,move)
-    if legal == True:
-        board.move(message.author.id,move)
-        gg = board.gameOver(message.author.id)
-        if gg != None:
-            remove(label)
-            if gg == "stalemate":
-                return package(item("text",opponent.mention+" It's a Stalemate"),board.out())
-            elif gg == message.author.id:
-                winner = message.author.mention
-            else:
-                winner = opponent.mention
-            return package(item("text","Game over, the winner is "+winner),board.out())
         findWaiter(label).reset()
-        global responses
-        r = findResponse(label)
-        responses.remove(r)
-        responses.append(response("",None,message.author,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = opponent.id,passMessage = True,format = inputFormat,label = label))
-        outputBoard = board.out()
-        return package(item("text",opponent.mention+" your move"),outputBoard)
-    else: 
+        return item("text","That is not a valid move shorthand.")
+    legal = board.isLegal(message.author.id,move)
+    if legal != True:
         findWaiter(label).reset()
         if legal == False:
             return item("text","that is not a valid move")
         else:
             return item('text',legal)
+    # only valid, legal moves past this point
+    # make the move
+    moveInfo = board.move(message.author.id,move)
+    nextPlayer = board.turnSwitch(moveInfo)
+    # check for gameover
+    gg = board.gameOver(message.author.id)
+    if gg != None:
+        losers = ""
+        for i in board.opponents:
+            if i.id == gg:
+                winner = i.mention
+            else:
+                losers +=  (i.mention + ' ')
+        remove(label)
+        if gg == "stalemate":
+            return package(item("text",losers + "\nIt's a Stalemate"),board.out())
+        return package(item("text","{}\nGame over, the winner is {}".format(losers, winner)),board.out())
+    # no gameover past this point, the game continues
+    findWaiter(label).reset()
+    global responses
+    r = findResponse(label)
+    responses.remove(r)
+    responses.append(response("",None,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = board.opponents[board.playerTurn].id,passMessage = True,format = inputFormat,label = label))
+    outputBoard = board.out()
+    if nextPlayer == message.author:
+        return outputBoard
+    return package(item("text",nextPlayer.mention+" your move"),outputBoard)
 
 class GameBoard:
 
@@ -561,13 +584,19 @@ class GameBoard:
         self.opponents = opponents
         self.playerTurn = 1
 
-    def nextTurn(self):
-        self.playerTurn = (self.playerTurn + 1) % len(self.playerTurn)
+    #determines the next player to move
+    def turnSwitch(self,info):
+        if info == None:
+            self.playerTurn = (self.playerTurn + 1) % len(self.opponents)
+        elif info == -1:
+            pass
+        elif info >-1:
+            self.playerturn = info
         return self.opponents[self.playerTurn]
 
-    def unpackMove(self,move):
-        return move,True
-    pass
+    def unpackMove(self,move,player):
+        return move
+    
     #def __getstate__(self):
     #    global userCache
     #    userCache.append(self.p1)
@@ -581,12 +610,12 @@ class GameBoard:
     #    self.board = data[2]
 
 class TicBoard(GameBoard):
-    def __init__(self,player1,player2):
-        GameBoard.__init__(self,[player1,player2])
+    def __init__(self,opponents):
+        GameBoard.__init__(self,opponents)
         print("in ticBoard.__init__()")
         self.key = {'a':0,'b':1,'c':2,'1':0,'2':1,'3':2}
-        self.p1 = player1
-        self.p2 = player2
+        self.p1 = opponents[0].id
+        self.p2 = opponents[1].id
         self.board = []
         for i in range(3): self.board.append(['  ','  ','  '])
         self.title = "Tictactoe"
@@ -637,13 +666,13 @@ c  {} |  {} | {}".format(self.board[0][0],self.board[0][1],self.board[0][2],self
 
 
 class ConnectFourBoard(GameBoard):
-    def __init__(self,player1,player2):
-        GameBoard.__init__(self,[player1,player2])
+    def __init__(self,opponents):
+        GameBoard.__init__(self,opponents)
         print("starting connect 4")
         self.title = "Connect Four"
         self.initalMessage = item("text","Welcome to Connect Four beta\n to move, type a number 1 through 7")
-        self.p1 = player1
-        self.p2 = player2
+        self.p1 = opponents[0].id
+        self.p2 = opponents[1].id
         self.board = []
         for i in range(7):
             self.board.append([])
@@ -704,10 +733,151 @@ class ConnectFourBoard(GameBoard):
                     return winner(b[x+3][i])
         return None
 
+class ReversiBoard(GameBoard):
+    def __init__(self,opponents):
+        GameBoard.__init__(self,opponents)
+        print("starting Reversi")
+        self.title = "Reversi"
+        self.initalMessage = item("text","Welcome to Reversi\n to move, type a number 1 through 7")
+        self.key = {'a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7,'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,"\\_\\_":" "," ":"\\_\\_", "__X__ ":'X','X':" __X__ "," __O__ ":'O','O':" __O__ "}
+        self.p1 = opponents[0].id
+        self.p2 = opponents[1].id
+        self.board = []
+        for i in range(8):
+            self.board.append([])
+            for x in range(8):
+                self.board[i].append(" ")
+        self.board[3][3] = "X"
+        self.board[4][4] = "X"
+        self.board[3][4] = "O"
+        self.board[4][3] = "O"
+        self.board = self.testboard()
+        self.expiration = DAY*7
+
+    def out(self):
+        b = []
+        for y in range(8):
+            for x in range(8):
+                b.append(self.key[self.board[x][y]])
+        b = tuple(b)
+        return item("text","\
+.  \\_\\__1_\\_\\__2_\\_\\__3_\\_\\__4_\\_\\__5_\\_\\__6_\\_\\__7_\\_\\__8_\\_\n\
+A |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+B |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+C |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+D |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+E |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+F |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+G |{}|{}|{}|{}|{}|{}|{}|{}|\n\
+H |{}|{}|{}|{}|{}|{}|{}|{}|".format(*b))
+
+    def testboard(self):
+        return  [list("OOOOOOO "),
+                 list("OOOOOO  "),
+                 list("OOOOOX  "),
+                 list("OOOOOXXX"),
+                 list("OOOXOOXX"),
+                 list("OOXXOOOX"),
+                 list("OOOOXXOO"),
+                 list("XXXXXXO "),]
+
+    def connections(self,player,moveX,moveY):
+        def realSpot(x,y):
+            return x>=0 and y>=0 and x<8 and y<8
+        if player == self.p1:
+            color = 'O'
+            oppColor = 'X'
+        else:
+            color = 'X'
+            oppColor = 'O'
+        vectors = ((-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1))
+        connections = []
+        for v in vectors:
+            dx = v[0]
+            dy = v[1]
+            x = moveX + dx
+            y = moveY + dy
+            if not realSpot(x,y) or not self.board[x][y] == oppColor:
+                #print("rejected ({},{})".format(x,y))
+                continue
+            while self.board[x][y] == oppColor:
+                #print("({},{})".format(x,y))
+                x += dx
+                y += dy
+                if not realSpot(x,y) or self.board[x][y] == ' s':
+                    break
+                if self.board[x][y] == color:
+                    connections.append((x,y,dx,dy))
+        return connections
+
+    def isLegal(self,player,move):
+        x = self.key[move[1]]
+        y = self.key[move[0]]
+        return self.board[x][y] == ' ' and len(self.connections(player,x,y)) > 0
+    
+    def move(self,player,move):
+        if player == self.p1:
+            color = 'O'
+            oppColor = 'X'
+        else:
+            color = 'X'
+            oppColor = 'O'
+        moveX = self.key[move[1]]
+        moveY = self.key[move[0]]
+
+        if player == self.p1:   
+            self.board[moveX][moveY] = 'O'
+        elif player == self.p2:
+            self.board[moveX][moveY] = 'X'
+        for cx,cy,dx,dy in self.connections(player,moveX,moveY):
+            x = moveX
+            y = moveY
+            while x != cx or y != cy:
+                x+=dx
+                y+=dy
+                self.board[x][y] = color
+
+        #check for swtiching turn
+        if player == self.p1:
+            opponent = self.p2
+        else:
+            opponent = self.p1
+        for x in range(8):
+            for y in range(8):
+                if self.board[x][y] == ' ' and len(self.connections(opponent,x,y))>0:
+                    return None
+        return -1
+    
+        
+    def gameOver(self,player):
+        if self.opponents[self.playerTurn] == self.p1:
+            color = 'O'
+            oppColor = 'X'
+        else:
+            color = 'X'
+            oppColor = 'O'
+        whiteScore = 0
+        blackScore = 0
+        for x in range(8):
+            for y in range(8):
+                if self.board[x][y] == 'X':
+                    whiteScore += 1
+                elif self.board[x][y] == 'O':
+                    blackScore += 1
+                elif len(self.connections(player,x,y))>0:
+                    return None
+        #past here the game is over
+        if whiteScore>blackScore:
+            return self.p2
+        elif blackScore>whiteScore:
+            return self.p1
+        return "stalemate"
+        
+
 CHESS_HELP = "To move, type the letter for your piece and the destination square. Ex: qd6\n\
 If multiple pieces of the same type can reach a square, specify by the rank or file that they do not have in common Ex: nfc3\n\
 If you do not specify a piece, I will assume you mean a pawn Ex: e4 is the same as pe4\n\
-To castle, move your king to the castled square Ex: kg1\n\
+To castle, move your king to its destination square Ex: kg1\n\
 You can also express any move explicitly using input and output square Ex: b5 c6 or b5c6\n\
 Pieces:\n\
 p = pawn\n\
@@ -719,16 +889,16 @@ k = king\n\
 Games expire after one week.\n\
 Have fun losing Barasu."
 class ChessBoard(GameBoard):
-    def __init__(self,player1,player2):
-        GameBoard.__init__(self,[player1,player2])
+    def __init__(self,opponents):
+        GameBoard.__init__(self,opponents)
         self.fileRef = {0:'a',1:'b',2:'c',3:'d',4:'e',5:'f',6:'g',7:'h','a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7}
         self.pieceRef = {'wr':'white rook','wn':'white knight','wb':'white bishop','wq':'white queen','wk':'white king','wp':'white pawn',
                          'br':'black rook','bn':'black knight','bb':'black bishop','bq':'black queen','bk':'black king','bp':'black pawn'}
         print("starting chess")
         self.title = "Chess"
         self.initalMessage = item("text",'Welcome to Chess beta\n type "ram chess help" for detailed controls')
-        self.p1 = player1
-        self.p2 = player2
+        self.p1 = opponents[0].id
+        self.p2 = opponents[1].id
         self.board = []
         for i in range(8):
             self.board.append([])
@@ -1093,6 +1263,7 @@ class ChessBoard(GameBoard):
                             return player
         #past here the opponent is not in check
         return "Stalemate"
+        
 
 def webwork(message,problem):
     print("in")
@@ -1387,59 +1558,69 @@ def bakaMemes():
 
 F = Format()
 
-def reset():
+def reset(**kwargs):
+    doResponses = True
+    doWaiters = True
+    for name,value in kwargs.items():
+        if name == "responses":
+            doResponses = value
+        elif name == "waiters":
+            doWaiters = value
     global responses
     global waiters
-    responses = [
-        response(["cancel","stop"],passMessage = True,function = cancel),
-        response(["hello ram","hi ram","ram hello","ram hi"],["Hello Barasu", "Hello", "hey"],usePrefix = False),
-        response("Ping", "Pong"),
-        response("Marco", "Polo",usePrefix = False),
-        response(["b.rem","rem"],"Who's Rem?",usePrefix = False),
-        response("flip a coin",["Heads","Tails"]),
-        response(["snap?","snap"],["Death","Mercy"]),
-        response("send yourself",item("file","./ram.py")),
-        response("send bootstrapper",item("file","./bootstrapper.py")),
-        response("send starter",item("file","./starter.py")),
-        response("send backup",item("file","./rambackup.py")),
-        response("send test meme",runAtSend(redditRetrieve,2,"goodanimemes","top")),
-        response("help","Look I don't really know what's going on either"),
-        response("send lock","nice try barasu"),
-        response("runatsend test",runAtSend(runAtSendTest)),
-        response("hushhush",";)",locked = True),
-        response(None,["Fuck you Kyle",None,None],user = KYLE,usePrefix = False),
-        response("berserk",package(
-            runAtSend(redditRetrieve,4,"nukedmemes"),
-            runAtSend(redditRetrieve,4,"cursedimages"),
-            runAtSend(redditRetrieve,4,"goodanimemes")
-        ),locked = True),
-        response("echo",None,takeArgs = True,function = echo,parse = False),
-        response("parse",None,takeArgs = True,function = echo),
-        response("meme",None,1,function = redditRetrieve,takeArgs = True),
-        response("Function test",None,"hello World",function = echo),
-    #    response("30 seconds?","not yet",label = "30seconds"),
-        response("webwork",function = webwork,takeArgs = True,parse = False,passMessage = True),
-        response(["tictactoe","tic tac toe"],"here",TicBoard,F.ticTacToe,function = gameInit,passMessage = True),
-        response(["connect four","fonnect cour","connectfour"],"here",ConnectFourBoard,F.connectFour,function = gameInit,passMessage = True),
-        response("chess","here",ChessBoard,F.chess,function = gameInit,passMessage = True),
-        response("chess help",CHESS_HELP),
-        response(["interpolate","interp"],None,function = interpolate,takeArgs = True),
-        response("bakamemes","OK",function = bakaMemes,locked = True)
-    ]
-
-
-    waiters = [
-        dailyPoster(datetime.time(hour = 23),BARASU,package(
-            runAtSend(redditRetrieve,5,"goodanimemes","top"),runAtSend(redditRetrieve,5,"animemes","top"))),
-        randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","owo daily")),
-        waiter(DAY + 10,SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
-    #    waiter(15,AVERAGE_PHOTOGRAPHER_SPAM,runAtSend(redditRetrieve,2,"dankmemes","new"),4)
-        waiter(10,AVERAGE_PHOTOGRAPHER_SPAM,item("text","Heartbeat"),10),
-    #    removeResponse(30,AVERAGE_PHOTOGRAPHER_SPAM,"30seconds","30 seconds have passed")
-    #    cacheWaiter(1)
+    if doResponses:
+        print("doing responses")
+        responses = [
+            response(["cancel","stop"],passMessage = True,function = cancel),
+            response(["hello ram","hi ram","ram hello","ram hi"],["Hello Barasu", "Hello", "hey"],usePrefix = False),
+            response("Ping", "Pong"),
+            response("Marco", "Polo",usePrefix = False),
+            response(["b.rem","rem"],"Who's Rem?",usePrefix = False),
+            response("flip a coin",["Heads","Tails"]),
+            response(["snap?","snap"],["Death","Mercy"]),
+            response("send yourself",item("file","./ram.py")),
+            response("send bootstrapper",item("file","./bootstrapper.py")),
+            response("send starter",item("file","./starter.py")),
+            response("send backup",item("file","./rambackup.py")),
+            response("send test meme",runAtSend(redditRetrieve,2,"goodanimemes","top")),
+            response("help","Look I don't really know what's going on either"),
+            response("send lock","nice try barasu"),
+            response("runatsend test",runAtSend(runAtSendTest)),
+            response("hushhush",";)",locked = True),
+            response(None,["Fuck you Kyle",None,None],user = KYLE,usePrefix = False),
+            response("berserk",package(
+                runAtSend(redditRetrieve,4,"nukedmemes"),
+                runAtSend(redditRetrieve,4,"cursedimages"),
+                runAtSend(redditRetrieve,4,"goodanimemes")
+            ),locked = True),
+            response("echo",None,takeArgs = True,function = echo,parse = False),
+            response("parse",None,takeArgs = True,function = echo),
+            response("meme",None,1,function = redditRetrieve,takeArgs = True),
+            response("Function test",None,"hello World",function = echo),
+        #    response("30 seconds?","not yet",label = "30seconds"),
+            response("webwork",function = webwork,takeArgs = True,parse = False,passMessage = True),
+            response(["tictactoe","tic tac toe"],"here",TicBoard,F.ticTacToe,function = gameInit,passMessage = True),
+            response(["connect four","fonnect cour","connectfour"],"here",ConnectFourBoard,F.connectFour,function = gameInit,passMessage = True), 
+            response(["othello","reversi"],"here",ReversiBoard,F.reversi,function = gameInit,passMessage = True),
+            response("chess","here",ChessBoard,F.chess,function = gameInit,passMessage = True),
+            response("chess help",CHESS_HELP),
+            response(["interpolate","interp"],None,function = interpolate,takeArgs = True),
+            response("bakamemes","OK",function = bakaMemes,locked = True)
         ]
-    if waiters[0].endtime+datetime.timedelta(days = -1)>datetime.datetime.now():
-        waiters[0].endtime = waiters[0].endtime + datetime.timedelta(days = -1)
+
+    if doWaiters:
+        waiters = [
+            dailyPoster(datetime.time(hour = 23),BARASU,package(
+                runAtSend(redditRetrieve,5,"goodanimemes","top"),runAtSend(redditRetrieve,5,"animemes","top"))),
+            randDailyPoster(SCREAM_CHAMBER_BOT_SPAM,item("text","owo daily")),
+            waiter(DAY + 10,SCREAM_CHAMBER_BOT_SPAM,item("text","m.e")),
+        #    waiter(15,AVERAGE_PHOTOGRAPHER_SPAM,runAtSend(redditRetrieve,2,"dankmemes","new"),4)
+            waiter(10,AVERAGE_PHOTOGRAPHER_SPAM,item("text","Heartbeat"),10),
+        #    removeResponse(30,AVERAGE_PHOTOGRAPHER_SPAM,"30seconds","30 seconds have passed")
+        #    cacheWaiter(1)
+            ]
+        if waiters[0].endtime+datetime.timedelta(days = -1)>datetime.datetime.now():
+            waiters[0].endtime = waiters[0].endtime + datetime.timedelta(days = -1)
 
 
 
@@ -1459,13 +1640,16 @@ async def on_message(message):
         print("updating")
         await message.channel.send("saving file (live)")
         await message.attachments[0].save("ram.py")
-    if message.content == ".reset " + lock():
+    if message.content == ".reset":
         await message.channel.send("Setting default responses and waiters...")
         reset()
-    if message.content == ".cache " + lock():
+    if message.content == ".resetresponses":
+        await message.channel.send("Setting default responses only...")
+        reset(waiters = False)
+    if message.content == ".cache":
         await message.channel.send("Saving to cache...")
         writeCache()
-    if message.content == ".load " + lock():
+    if message.content == ".load":
         await message.channel.send("Loading from cache...")
         await loadCache()
     if message.content == ".addthing":
