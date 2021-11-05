@@ -512,11 +512,11 @@ def gameInit(message,boardClass,inputFormat,playersMin = 2,playersMax = 2):
         if playersMin == playersMax == 2:
             return item("text","@ one person to play with")
         return item("text","@ between {} and {} people".format(playersMin, playersMax))
-    opponents = [message.author]
+    opponents = [message.author.id]
     labelCode = message.author.id
     names = message.author.display_name
     for i in message.mentions:
-        opponents.append(i)
+        opponents.append(i.id)
         labelCode += i.id
         names += ' ' + i.display_name
     board = boardClass(opponents)
@@ -531,10 +531,13 @@ def gameInit(message,boardClass,inputFormat,playersMin = 2,playersMax = 2):
     return package(board.initalMessage,board.out())
 
 def game(message,board,inputFormat,move):
+    #mention string
+    def mention(user):
+        return "<@"+str(user)+">"
     # remake label
     labelCode = 0
     for i in board.opponents: 
-        labelCode += i.id
+        labelCode += i
     label = board.title+str(labelCode)+str(message.channel.id)
     # sanatize move and unpack shorthand
     move = move.lower()
@@ -559,10 +562,10 @@ def game(message,board,inputFormat,move):
     if gg != None:
         losers = ""
         for i in board.opponents:
-            if i.id == gg:
-                winner = i.mention
+            if i == gg:
+                winner = mention(i)
             else:
-                losers +=  (i.mention + ' ')
+                losers +=  (mention(i) + ' ')
         remove(label)
         if gg == "stalemate":
             return package(item("text",losers + "\nIt's a Stalemate"),board.out())
@@ -572,11 +575,11 @@ def game(message,board,inputFormat,move):
     global responses
     r = findResponse(label)
     responses.remove(r)
-    responses.append(response("",None,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = board.opponents[board.playerTurn].id,passMessage = True,format = inputFormat,label = label))
+    responses.append(response("",None,board,inputFormat,function = game,usePrefix = False,takeArgs = True, parse = False,channel = message.channel.id,user = board.opponents[board.playerTurn],passMessage = True,format = inputFormat,label = label))
     outputBoard = board.out()
     if nextPlayer == message.author:
         return outputBoard
-    return package(item("text",nextPlayer.mention+" your move"),outputBoard)
+    return package(item("text",mention(nextPlayer)+" your move"),outputBoard)
 
 class GameBoard:
 
@@ -614,8 +617,8 @@ class TicBoard(GameBoard):
         GameBoard.__init__(self,opponents)
         print("in ticBoard.__init__()")
         self.key = {'a':0,'b':1,'c':2,'1':0,'2':1,'3':2}
-        self.p1 = opponents[0].id
-        self.p2 = opponents[1].id
+        self.p1 = opponents[0]
+        self.p2 = opponents[1]
         self.board = []
         for i in range(3): self.board.append(['  ','  ','  '])
         self.title = "Tictactoe"
@@ -671,8 +674,8 @@ class ConnectFourBoard(GameBoard):
         print("starting connect 4")
         self.title = "Connect Four"
         self.initalMessage = item("text","Welcome to Connect Four beta\n to move, type a number 1 through 7")
-        self.p1 = opponents[0].id
-        self.p2 = opponents[1].id
+        self.p1 = opponents[0]
+        self.p2 = opponents[1]
         self.board = []
         for i in range(7):
             self.board.append([])
@@ -740,8 +743,8 @@ class ReversiBoard(GameBoard):
         self.title = "Reversi"
         self.initalMessage = item("text","Welcome to Reversi\n to move, type a number 1 through 7")
         self.key = {'a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7,'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,"\\_\\_":" "," ":"\\_\\_", "__X__ ":'X','X':" __X__ "," __O__ ":'O','O':" __O__ "}
-        self.p1 = opponents[0].id
-        self.p2 = opponents[1].id
+        self.p1 = opponents[0]
+        self.p2 = opponents[1]
         self.board = []
         for i in range(8):
             self.board.append([])
@@ -850,7 +853,8 @@ H |{}|{}|{}|{}|{}|{}|{}|{}|".format(*b))
     
         
     def gameOver(self,player):
-        if self.opponents[self.playerTurn] == self.p1:
+        player = self.opponents[self.playerTurn]
+        if player == self.p1:
             color = 'O'
             oppColor = 'X'
         else:
@@ -897,8 +901,8 @@ class ChessBoard(GameBoard):
         print("starting chess")
         self.title = "Chess"
         self.initalMessage = item("text",'Welcome to Chess beta\n type "ram chess help" for detailed controls')
-        self.p1 = opponents[0].id
-        self.p2 = opponents[1].id
+        self.p1 = opponents[0]
+        self.p2 = opponents[1]
         self.board = []
         for i in range(8):
             self.board.append([])
